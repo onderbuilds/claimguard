@@ -1,0 +1,10 @@
+[project]
+name = "claimguard"
+version = "0.1.0"
+description = "Scam-link and risky-transaction guard for AI agents that pay "
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+claimguard = "claimguard.cli:main"
