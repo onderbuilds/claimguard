@@ -64,6 +64,10 @@ Testnet only for now. There is no default blocklist: `blocked` needs `--contract
 - NEAR account signals are simple (balance, storage, keys, contract code). They flag throwaway accounts, not every scam.
 - The blocklist is only as good as whoever maintains it.
 
+## Credits
+
+Built with help from AI coding tools.
+
 ## License
 
 See [LICENSE](LICENSE) (MIT).
