@@ -1,10 +1,11 @@
+"""Offline URL heuristics. No network, no secrets."""
 import ipaddress
 import re
 from urllib.parse import urlsplit, unquote
 
 from .verdict import Finding, Verdict
 
-
+# Official domains of brands that scammers commonly impersonate (extend via PRs).
 BRANDS = {
     "near": ["near.org", "near.ai", "nearhackathon.com", "near-intents.org"],
     "phantom": ["phantom.com", "phantom.app"],
@@ -43,10 +44,22 @@ def _levenshtein(a: str, b: str) -> int:
 
 def check_url(raw: str) -> Verdict:
     v = Verdict(target=raw)
-    url = raw.strip()
+    url = (raw or "").strip()
+    if not url:
+        v.findings.append(Finding("empty_url", 60, "Empty URL"))
+        return v
+    scheme = url.split(":", 1)[0].lower()
+    if scheme in ("javascript", "data", "file", "vbscript"):
+        v.findings.append(Finding("bad_scheme", 80, f"'{scheme}:' links can run code or read local files"))
+        return v
     if "://" not in url:
         url = "http://" + url
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        parts.port  # raises on garbage ports
+    except ValueError as e:
+        v.findings.append(Finding("malformed_url", 60, f"Could not parse URL ({e})"))
+        return v
     host = (parts.hostname or "").lower().rstrip(".")
     full = unquote(url).lower()
     add = lambda c, w, r: v.findings.append(Finding(c, w, r))

@@ -1,10 +1,7 @@
 __pycache__/
 *.pyc
-.venv/
-venv/
 .env
 *.key
-*.pem
-*.log
-submission*.json
 credentials*.json
+submission*.json
+contract/target/

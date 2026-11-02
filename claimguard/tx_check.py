@@ -1,6 +1,9 @@
+"""Decode EVM calldata for common wallet-drainer patterns (offline)."""
 from .verdict import Finding, Verdict
 
 MAX_UINT = (1 << 256) - 1
+# nobody approves 2^128 of anything on purpose; treat it as unlimited
+UNLIMITED_AT = 1 << 128
 SELECTORS = {
     "095ea7b3": "approve(address,uint256)",
     "a22cb465": "setApprovalForAll(address,bool)",
@@ -9,6 +12,8 @@ SELECTORS = {
     "23b872dd": "transferFrom(address,address,uint256)",
     "39509351": "increaseAllowance(address,uint256)",
 }
+# how many 32-byte arguments each known call needs before we can read it
+ARGC = {"095ea7b3": 2, "a22cb465": 2, "d505accf": 7, "a9059cbb": 2, "23b872dd": 3, "39509351": 2}
 
 
 def _words(data: str):
@@ -17,9 +22,15 @@ def _words(data: str):
 
 
 def check_calldata(calldata: str, known_spenders: set | None = None) -> Verdict:
-    data = calldata.lower().removeprefix("0x")
+    data = (calldata or "").strip().lower().removeprefix("0x")
     v = Verdict(target="0x" + data[:8] + "…")
     add = lambda c, w, r: v.findings.append(Finding(c, w, r))
+    if not all(c in "0123456789abcdef" for c in data):
+        # can't decode it, so we can't vouch for it
+        add("bad_calldata", 60, "Calldata is not valid hex")
+        return v
+    if len(data) > 8 and (len(data) - 8) % 64:
+        add("odd_calldata", 30, "Calldata length does not match 32-byte arguments")
     if len(data) < 8:
         add("bad_calldata", 30, "Calldata too short to decode")
         return v
@@ -29,17 +40,23 @@ def check_calldata(calldata: str, known_spenders: set | None = None) -> Verdict:
     spender = ("0x" + w[0][24:]) if w else "?"
     trusted = known_spenders and spender in {s.lower() for s in known_spenders}
     if name is None:
-        add("unknown_selector", 20, f"Unknown function selector 0x{sel}; simulate before signing")
-    elif sel in ("095ea7b3", "39509351") and len(w) >= 2:
+        add("unknown_selector", 30, f"Unknown function selector 0x{sel}; simulate before signing")
+        return v
+    if len(w) < ARGC[sel] or any(len(x) != 64 for x in w[:ARGC[sel]]):
+        add("bad_calldata", 60, f"{name} is missing arguments")
+        return v
+    if sel in ("095ea7b3", "39509351"):
         amount = int(w[1], 16)
-        if amount >= MAX_UINT // 2:
+        if amount >= UNLIMITED_AT:
             add("unlimited_approve", 45 if trusted else 70, f"Unlimited token allowance to {spender}")
         elif not trusted:
-            add("approve_unknown", 25, f"Token allowance to unknown spender {spender}")
-    elif sel == "a22cb465" and len(w) >= 2 and int(w[1], 16) == 1:
+            add("approve_unknown", 30, f"Token allowance to unknown spender {spender}")
+    elif sel == "a22cb465" and int(w[1], 16) != 0:
         add("approval_for_all", 45 if trusted else 70, f"setApprovalForAll(true) gives {spender} control of every NFT in the collection")
     elif sel == "d505accf":
         add("permit_signature", 50, "Off-chain permit grants allowance without an on-chain approve; common in drainer kits")
+    elif sel == "a9059cbb" and int(w[1], 16) >= UNLIMITED_AT and not trusted:
+        add("huge_transfer", 30, f"Transfer of an enormous amount to unknown address {spender}")
     elif sel == "23b872dd":
         add("transfer_from", 30, "transferFrom moves tokens from another address")
     return v
